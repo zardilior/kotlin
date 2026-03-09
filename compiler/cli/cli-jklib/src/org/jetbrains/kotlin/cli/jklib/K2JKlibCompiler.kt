@@ -39,6 +39,7 @@ import org.jetbrains.kotlin.cli.jvm.configureJdkHomeFromSystemProperty
 import org.jetbrains.kotlin.codegen.CompilationException
 import org.jetbrains.kotlin.config.*
 import org.jetbrains.kotlin.config.CommonConfigurationKeys.MODULE_NAME
+import org.jetbrains.kotlin.config.JvmClosureGenerationScheme
 import org.jetbrains.kotlin.container.get
 import org.jetbrains.kotlin.context.ContextForNewModule
 import org.jetbrains.kotlin.context.ProjectContext
@@ -59,7 +60,10 @@ import org.jetbrains.kotlin.ir.*
 import org.jetbrains.kotlin.ir.backend.jklib.JKlibDescriptorMangler
 import org.jetbrains.kotlin.ir.backend.jklib.JKlibIrLinker
 import org.jetbrains.kotlin.ir.backend.jklib.JKlibModuleSerializer
+import org.jetbrains.kotlin.util.PerformanceManager
 import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
+import org.jetbrains.kotlin.cli.jklib.pipeline.JKlibCliPipeline
+import org.jetbrains.kotlin.cli.common.messages.GroupingMessageCollector
 import org.jetbrains.kotlin.ir.declarations.impl.IrFactoryImpl
 import org.jetbrains.kotlin.ir.descriptors.IrDescriptorBasedFunctionFactory
 import org.jetbrains.kotlin.ir.util.ExternalDependenciesGenerator
@@ -148,6 +152,17 @@ class K2JKlibCompiler : CLICompiler<K2JKlibCompilerArguments>() {
         val exitCodeKlib = compileLibrary(arguments, rootDisposable, paths, destination)
         if (outputKind == OutputKind.LIBRARY || exitCodeKlib != ExitCode.OK) return exitCodeKlib
         return ExitCode.OK
+    }
+
+    private fun compileLibraryInPipeline(
+        arguments: K2JKlibCompilerArguments,
+        rootDisposable: Disposable,
+        paths: KotlinPaths?,
+        destination: File
+    ): ExitCode {
+        val performanceManager = configuration.perfManager
+        val pipeline = JKlibCliPipeline(performanceManager ?: object : PerformanceManager(JvmPlatforms.defaultJvmPlatform, "JKlib") {})
+        return pipeline.execute(arguments, Services.EMPTY, configuration.getNotNull(CommonConfigurationKeys.MESSAGE_COLLECTOR_KEY))
     }
 
     fun createJarDependenciesModuleDescriptor(
@@ -274,7 +289,7 @@ class K2JKlibCompiler : CLICompiler<K2JKlibCompilerArguments>() {
 
         val jarDepsModuleDescriptor = createJarDependenciesModuleDescriptor(projectEnvironment, projectContext)
         val descriptors = sortedDependencies.map { getModuleDescriptor(it) } + jarDepsModuleDescriptor
-        descriptors.forEach { descriptor -> descriptor.setDependencies(descriptors) }
+        descriptors.forEach { if (it != jarDepsModuleDescriptor) it.setDependencies(descriptors) }
 
         val mainModuleLib = sortedDependencies.find { it.libraryFile == klib }
 
@@ -286,6 +301,7 @@ class K2JKlibCompiler : CLICompiler<K2JKlibCompilerArguments>() {
         val symbolTable = SymbolTable(IdSignatureDescriptor(mangler), IrFactoryImpl)
         val typeTranslator = TypeTranslatorImpl(symbolTable, configuration.languageVersionSettings, mainModule)
         val irBuiltIns = IrBuiltInsOverDescriptors(mainModule.builtIns, typeTranslator, symbolTable)
+
         val stubGenerator = DeclarationStubGeneratorImpl(
             mainModule,
             symbolTable,
@@ -439,6 +455,19 @@ class K2JKlibCompiler : CLICompiler<K2JKlibCompilerArguments>() {
             for (path in arguments.classpath?.split(java.io.File.pathSeparatorChar).orEmpty()) {
                 add(CLIConfigurationKeys.CONTENT_ROOTS, JvmClasspathRoot(java.io.File(path)))
             }
+
+            arguments.samConversions?.let {
+                val parsedValue = JvmClosureGenerationScheme.fromString(it)
+                if (parsedValue != null) {
+                put(JVMConfigurationKeys.SAM_CONVERSIONS, parsedValue)
+                } else {
+                messageCollector.report(
+                    ERROR,
+                    "Unknown `-Xsam-conversions` argument: ${it}\n." +
+                    "Supported arguments: ${JvmClosureGenerationScheme.entries.joinToString { it.description }}",
+                )
+                }
+            }
         }
 
         val moduleName = arguments.moduleName ?: JvmProtoBufUtil.DEFAULT_MODULE_NAME
@@ -576,7 +605,7 @@ class K2JKlibCompiler : CLICompiler<K2JKlibCompilerArguments>() {
                 manifest {
                     moduleName(configuration[MODULE_NAME]!!)
                     versions(versions)
-                    platformAndTargets(BuiltInsPlatform.COMMON, emptyList())
+                    platformAndTargets(BuiltInsPlatform.JKLIB, emptyList())
                 }
                 includeMetadata(serializerOutput.serializedMetadata ?: error("expected serialized metadata"))
                 includeIr(serializerOutput.serializedIr)

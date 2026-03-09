@@ -7,12 +7,13 @@ package org.jetbrains.kotlin.test.frontend.fir
 
 import com.intellij.openapi.util.io.FileUtil
 import org.jetbrains.kotlin.cli.common.messages.MessageCollector
+import org.jetbrains.kotlin.cli.pipeline.CheckCompilationErrors.CheckDiagnosticCollector
 import org.jetbrains.kotlin.cli.pipeline.ConfigurationPipelineArtifact
 import org.jetbrains.kotlin.cli.pipeline.FrontendFilesForPluginsGenerationPipelinePhase
 import org.jetbrains.kotlin.cli.pipeline.FrontendPipelineArtifact
 import org.jetbrains.kotlin.cli.pipeline.PipelinePhase
+import org.jetbrains.kotlin.config.CompilerConfiguration
 import org.jetbrains.kotlin.config.messageCollector
-import org.jetbrains.kotlin.diagnostics.impl.DiagnosticsCollectorImpl
 import org.jetbrains.kotlin.fir.declarations.FirFile
 import org.jetbrains.kotlin.fir.moduleData
 import org.jetbrains.kotlin.fir.pipeline.SingleModuleFrontendOutput
@@ -41,7 +42,7 @@ abstract class FirCliFacade<Phase, OutputPipelineArtifact>(
         val configuration = testServices.compilerConfigurationProvider.getCompilerConfiguration(module)
         val input = ConfigurationPipelineArtifact(
             configuration = configuration,
-            diagnosticCollector = DiagnosticsCollectorImpl(),
+            diagnosticCollector = org.jetbrains.kotlin.diagnostics.impl.DiagnosticsCollectorImpl(),
             rootDisposable = testServices.compilerConfigurationProvider.testRootDisposable,
         )
 
@@ -60,7 +61,7 @@ abstract class FirCliFacade<Phase, OutputPipelineArtifact>(
         firOutputs: List<SingleModuleFrontendOutput>,
     ): List<FirOutputPartForDependsOnModule> {
         val modulesFromTheSameStructure = module.transitiveDependsOnDependencies(includeSelf = true, reverseOrder = true)
-            .associateBy { "<${it.name}>"}
+            .associateBy { "<${it.name}>" }
         return firOutputs.map {
             val correspondingModule = modulesFromTheSameStructure.getValue(it.session.moduleData.name.asString())
             it.toTestOutputPart(correspondingModule, testServices)
