@@ -1,5 +1,3 @@
-@file:Suppress("HasPlatformType")
-
 import java.io.File
 
 val buildVersionFilePath = layout.buildDirectory.file("build.txt")

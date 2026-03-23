@@ -1,5 +1,3 @@
-@file:Suppress("HasPlatformType")
-
 import org.gradle.internal.jvm.Jvm
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.plugin.attributes.KlibPackaging
